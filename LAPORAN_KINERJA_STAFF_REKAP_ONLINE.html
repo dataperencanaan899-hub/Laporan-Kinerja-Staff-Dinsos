@@ -1,0 +1,967 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<title>Aplikasi Laporan Kinerja Staf — Rekap Terpusat</title>
+<style>
+  :root{
+    --navy:#1f3a5f;
+    --navy-dark:#152840;
+    --paper:#ffffff;
+    --bg:#eef1f5;
+    --line:#c6cdd6;
+    --accent:#b5651d;
+    --text:#1c2530;
+    --muted:#5b6773;
+    --ok:#2e7d4f;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0; background:var(--bg); font-family:'Segoe UI', Arial, sans-serif; color:var(--text);}
+
+  .topbar{
+    position:sticky; top:0; z-index:60; background:var(--navy-dark); color:#fff;
+    padding:14px 22px; display:flex; align-items:center; justify-content:space-between;
+    flex-wrap:wrap; gap:10px; box-shadow:0 2px 8px rgba(0,0,0,.2);
+  }
+  .topbar h1{font-size:16px; margin:0; font-weight:600;}
+  .topbar .sub{font-size:11.5px; color:#b9c6d6; margin-top:2px;}
+  .topbar-actions{display:flex; gap:8px; flex-wrap:wrap; align-items:center;}
+  button.action{background:var(--navy); color:#fff; border:1px solid #345277; padding:8px 14px; border-radius:6px; font-size:13px; cursor:pointer;}
+  button.action:hover{background:#2a4d78;}
+  button.action.primary{background:var(--accent); border-color:#8f4f16;}
+  button.action.primary:hover{background:#9c5518;}
+  button.action.ghost{background:transparent; border:1px solid #47607f;}
+  button.action.ghost:hover{background:#26405e;}
+  button.action.ghost.active{background:var(--accent); border-color:#8f4f16;}
+  button.action:disabled{opacity:.4; cursor:not-allowed;}
+
+  /* ===== progress stepper ===== */
+  .stepper{max-width:1180px; margin:20px auto 0; padding:0 18px; display:flex; gap:4px;}
+  .step-pill{
+    flex:1; text-align:center; padding:9px 4px; border-radius:20px; font-size:11.5px; font-weight:600;
+    background:#dbe3ec; color:#7c8a99; cursor:pointer; user-select:none; transition:.15s;
+    border:1px solid transparent;
+  }
+  .step-pill .num{display:inline-block; width:18px; height:18px; line-height:18px; border-radius:50%; background:#b8c3d0; color:#fff; font-size:10.5px; margin-right:5px;}
+  .step-pill.active{background:var(--navy); color:#fff;}
+  .step-pill.active .num{background:var(--accent);}
+  .step-pill.done{background:#dcefe3; color:var(--ok);}
+  .step-pill.done .num{background:var(--ok);}
+  .step-pill:hover{filter:brightness(1.03);}
+
+  .wrap{max-width:1180px; margin:20px auto 90px; padding:0 18px;}
+  .sheet{background:var(--paper); border:1px solid var(--line); border-radius:10px; padding:30px 34px; box-shadow:0 1px 3px rgba(0,0,0,.06); min-height:420px;}
+  .step-panel{display:none;}
+  .step-panel.active{display:block; animation:fadein .2s ease;}
+  @keyframes fadein{from{opacity:0; transform:translateY(4px);} to{opacity:1; transform:translateY(0);}}
+
+  .step-title{font-size:19px; font-weight:700; color:var(--navy-dark); margin:0 0 4px;}
+  .step-desc{font-size:13px; color:var(--muted); margin:0 0 22px;}
+  .note-box{background:#fff6ea; border:1px solid #e7cfa3; color:#6b4c14; font-size:12.5px; padding:10px 12px; border-radius:6px; margin-bottom:18px;}
+
+  .field-grid{display:grid; grid-template-columns:1fr 1fr; gap:18px 24px;}
+  .field{display:flex; flex-direction:column; gap:5px;}
+  .field.full{grid-column:1/-1;}
+  .field label{font-size:13px; font-weight:600; color:var(--navy-dark);}
+  .field input, .field textarea{
+    border:1px solid #b9c3cf; border-radius:6px; padding:9px 10px; font-size:14px; font-family:inherit;
+    background:#fbfcfe;
+  }
+  .field textarea{min-height:70px; resize:vertical;}
+  .field input:focus, .field textarea:focus{outline:2px solid #9db6d6; border-color:var(--navy);}
+
+  /* ===== dynamic tables inside steps ===== */
+  table.rpt{width:100%; border-collapse:collapse; font-size:13px; margin-bottom:10px;}
+  table.rpt th, table.rpt td{border:1px solid #cfd8e3; padding:6px 7px; vertical-align:top;}
+  table.rpt th{background:#eef2f7; text-align:center; font-weight:700; font-size:12px;}
+  table.rpt td.center{text-align:center;}
+  table.rpt textarea, table.rpt input{width:100%; border:1px solid transparent; background:transparent; resize:vertical; font-size:13px; padding:3px 4px; border-radius:4px;}
+  table.rpt textarea:focus, table.rpt input:focus{border-color:#9db6d6; background:#fff;}
+  table.rpt textarea{min-height:38px;}
+  td.autopct{text-align:center; font-weight:700; color:var(--navy-dark); background:#f4f7fa;}
+  .col-actions{background:#fafcff;}
+  .row-btn{border:1px solid #d9c2c2; background:#fff; color:#8a3030; border-radius:4px; font-size:11px; padding:3px 7px; cursor:pointer; white-space:nowrap;}
+  .row-btn:hover{background:#fdecec;}
+  .add-btn{border:1px dashed var(--navy); background:#eef4fc; color:var(--navy-dark); border-radius:6px; font-size:12.5px; padding:6px 12px; cursor:pointer; white-space:nowrap; margin-top:6px;}
+  .add-btn:hover{background:#dfeaf8;}
+  .group-actions{display:flex; flex-direction:column; gap:4px;}
+  .mini-remove{margin-top:3px;}
+
+  .nav-row{display:flex; justify-content:space-between; align-items:center; margin-top:28px; padding-top:18px; border-top:1px solid #e3e8ee;}
+  .nav-right{display:flex; gap:10px; flex-wrap:wrap; justify-content:flex-end;}
+
+  /* ===== preview (final step) ===== */
+  #printArea, .preview-box{font-family:'Times New Roman', Times, serif; font-size:12.5pt; color:#000;}
+  .preview-box{border:1px solid #d3dae2; border-radius:8px; padding:22px 26px; background:#fdfdfd; max-height:640px; overflow:auto;}
+  .preview-box table{border-collapse:collapse; width:100%; margin-bottom:10px;}
+  .preview-box td, .preview-box th{border:1px solid #333; padding:4px 6px; font-size:11.5pt; vertical-align:top;}
+  .preview-box th{background:#dfe6ee; text-align:center; font-weight:bold;}
+  .preview-box .title{text-align:center; font-weight:bold; font-size:14pt; margin-bottom:10px; line-height:1.4;}
+  .preview-box .meta{margin:3px 0; font-size:12.5pt;}
+  .preview-box .meta b{display:inline-block; width:130px;}
+  .preview-box h3{font-size:12.5pt; margin:20px 0 6px;}
+  .preview-box .txt-block{margin-bottom:12px;}
+  .preview-box .txt-block b{display:block; margin-bottom:3px;}
+  .preview-box .txt-box{border:1px solid #888; min-height:36px; padding:6px; white-space:pre-wrap;}
+  .preview-box .sign-td{width:50%; text-align:center; vertical-align:top; font-size:12.5pt; border:none !important;}
+  .preview-box .sign-space{height:55px;}
+  .preview-box .sign-name{font-weight:bold; text-decoration:underline;}
+
+  /* ===== rekap (kasubbag) view ===== */
+  .rekap-toolbar{display:flex; gap:10px; margin-bottom:14px; flex-wrap:wrap; align-items:center;}
+  .rekap-toolbar input{flex:1; min-width:220px; padding:9px 10px; border:1px solid #b9c3cf; border-radius:6px; font-size:14px; background:#fbfcfe;}
+  #rekapStatus{font-size:12.5px; color:var(--muted); margin-bottom:10px;}
+  #rekapDetailWrap{display:none; margin-top:26px;}
+  .detail-head{display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; flex-wrap:wrap; gap:8px;}
+
+  #printArea{display:none;}
+  @media print{
+    body *{visibility:hidden;}
+    #printArea, #printArea *{visibility:visible;}
+    #printArea{display:block; position:absolute; left:0; top:0; width:100%;}
+    .topbar, .stepper, .nav-row, .no-print{display:none !important;}
+  }
+</style>
+</head>
+<body>
+
+<div class="topbar no-print">
+  <div>
+    <h1>Aplikasi Input Laporan Kinerja Staf</h1>
+    <div class="sub">DINAS SOSIAL PROVINSI KALIMANTAN SELATAN</div>
+  </div>
+  <div class="topbar-actions">
+    <button class="action ghost active" id="btnModeIsi" onclick="switchMode('isi')">📝 Isi Laporan</button>
+    <button class="action ghost" id="btnModeRekap" onclick="switchMode('rekap')">🔒📊 Rekap Semua Staf (Admin)</button>
+    <button class="action ghost" onclick="resetForm()" id="btnReset">Reset</button>
+  </div>
+</div>
+
+<div class="stepper no-print" id="stepper"></div>
+
+<!-- ================= MODE: ISI LAPORAN ================= -->
+<div class="wrap" id="wrapIsi">
+  <div class="sheet">
+
+    <!-- STEP 1: INFO UMUM -->
+    <div class="step-panel" data-step="0">
+      <div class="step-title">1. Informasi Umum</div>
+      <div class="step-desc">Isi periode laporan serta identitas pegawai yang dinilai.</div>
+      <div class="field-grid">
+        <div class="field"><label>Bulan Awal</label><input id="bulanAwal" placeholder="Januari"></div>
+        <div class="field"><label>Bulan Akhir</label><input id="bulanAkhir" placeholder="Januari"></div>
+        <div class="field"><label>Tahun</label><input id="tahunLaporan" placeholder="2026"></div>
+        <div class="field"></div>
+        <div class="field"><label>Nama Pegawai</label><input id="namaPegawai" placeholder="Nama lengkap pegawai"></div>
+        <div class="field"><label>Nama Jabatan</label><input id="namaJabatan" placeholder="Jabatan pegawai"></div>
+      </div>
+    </div>
+
+    <!-- STEP 2: KINERJA UTAMA -->
+    <div class="step-panel" data-step="1">
+      <div class="step-title">2. Kinerja Utama</div>
+      <div class="step-desc">Sesuaikan dengan kinerja utama pada e-dialog. Satu Kinerja Utama bisa memiliki lebih dari satu indikator.</div>
+      <table class="rpt" id="tblKinerja">
+        <colgroup>
+          <col style="width:4%"><col style="width:21%"><col style="width:16%">
+          <col style="width:8%"><col style="width:9%"><col style="width:9%">
+          <col style="width:13%"><col style="width:12%"><col style="width:8%" class="no-print">
+        </colgroup>
+        <thead>
+          <tr>
+            <th rowspan="2">No.</th><th rowspan="2">Kinerja Utama</th><th rowspan="2">Indikator</th>
+            <th rowspan="2">Capaian<br>Tahun Lalu</th><th rowspan="2">Satuan</th>
+            <th colspan="3">TARGET DAN CAPAIAN</th><th rowspan="2" class="no-print">Aksi</th>
+          </tr>
+          <tr><th>Target</th><th>Realisasi s.d Bulan Ini</th><th>% Capaian</th></tr>
+        </thead>
+        <tbody id="kinerjaBody"></tbody>
+      </table>
+      <button class="add-btn no-print" onclick="addKinerjaGroup()">+ Tambah Kinerja Utama</button>
+    </div>
+
+    <!-- STEP 3: AKTIFITAS -->
+    <div class="step-panel" data-step="2">
+      <div class="step-title">3. Aktifitas / Rencana Aksi</div>
+      <div class="step-desc">Isikan rencana aksi/aktifitas bulanan yang berhubungan dengan indikator di atas.</div>
+      <table class="rpt" id="tblAktifitas">
+        <colgroup>
+          <col style="width:4%"><col style="width:37%">
+          <col style="width:8%"><col style="width:9%"><col style="width:9%">
+          <col style="width:13%"><col style="width:12%"><col style="width:8%" class="no-print">
+        </colgroup>
+        <thead>
+          <tr>
+            <th>No.</th><th>Aktifitas yang berhubungan dengan Indikator</th>
+            <th>Capaian Aktifitas Tahun Lalu</th><th>Satuan Indikator Aktifitas</th>
+            <th>Target aktifitas</th><th>realisasi aktifitas</th><th>Capaian %</th>
+            <th class="no-print">Aksi</th>
+          </tr>
+        </thead>
+        <tbody id="aktifitasBody"></tbody>
+      </table>
+      <button class="add-btn no-print" onclick="addAktifitasRow()">+ Tambah Baris Aktifitas</button>
+    </div>
+
+    <!-- STEP 4: PENJELASAN -->
+    <div class="step-panel" data-step="3">
+      <div class="step-title">4. Penjelasan per Indikator Kinerja</div>
+      <div class="step-desc">Jelaskan upaya, hambatan, dan rencana tindak lanjut yang telah/akan dilakukan.</div>
+      <div class="field-grid">
+        <div class="field full"><label>Upaya :</label><textarea id="upaya"></textarea></div>
+        <div class="field full"><label>Hambatan :</label><textarea id="hambatan"></textarea></div>
+        <div class="field full"><label>Rencana Tindak Lanjut :</label><textarea id="rencana"></textarea></div>
+      </div>
+    </div>
+
+    <!-- STEP 5: CATATAN & TANGGAPAN -->
+    <div class="step-panel" data-step="4">
+      <div class="step-title">5. Catatan Atasan &amp; Tanggapan</div>
+      <div class="step-desc">Bagian ini opsional &mdash; dapat diisi belakangan oleh atasan langsung (ess IV) maupun staf terkait.</div>
+      <div class="field-grid">
+        <div class="field full"><label>Catatan atasan langsung <span style="font-weight:400;">(diisi oleh ess IV)</span></label><textarea id="catatanAtasan"></textarea></div>
+        <div class="field full"><label>Tanggapan <span style="font-weight:400;">(diisi oleh staf terkait catatan atasan langsung)</span></label><textarea id="tanggapan"></textarea></div>
+      </div>
+    </div>
+
+    <!-- STEP 6: TANDA TANGAN -->
+    <div class="step-panel" data-step="5">
+      <div class="step-title">6. Tanda Tangan</div>
+      <div class="step-desc">Isi jabatan, nama, dan NIP pihak yang mengetahui dan yang melaporkan.</div>
+      <div class="field-grid">
+        <div class="field"><label>Jabatan Atasan Langsung</label><input id="jabatanAtasan" placeholder="Kepala Sub Bagian Perencanaan dan Pelaporan"></div>
+        <div class="field"></div>
+        <div class="field"><label>Nama Atasan Langsung</label><input id="namaAtasan" placeholder="Nama, gelar"></div>
+        <div class="field"><label>NIP Atasan Langsung</label><input id="nipAtasan" placeholder="NIP"></div>
+        <div class="field"><label>Jabatan Pelapor (Staf)</label><input id="jabatanPelapor" placeholder="Jabatan pelapor"></div>
+        <div class="field"></div>
+        <div class="field"><label>Nama Pelapor (Staf)</label><input id="namaPelapor" placeholder="Nama, gelar"></div>
+        <div class="field"><label>NIP Pelapor (Staf)</label><input id="nipPelapor" placeholder="NIP"></div>
+      </div>
+    </div>
+
+    <!-- STEP 7: PREVIEW -->
+    <div class="step-panel" data-step="6">
+      <div class="step-title">7. Pratinjau &amp; Unduh</div>
+      <div class="step-desc">Periksa kembali seluruh isian. Simpan ke Rekap Pusat agar Kasubbag bisa melihatnya, lalu cetak/unduh sebagai file Word untuk arsip pribadi.</div>
+      <div class="note-box">📌 "Simpan ke Rekap Pusat" akan menyimpan laporan ini ke penyimpanan bersama aplikasi ini &mdash; <b>dapat dilihat oleh siapa pun yang membuka aplikasi ini</b> (mis. Kasubbag Perencanaan) melalui menu "Rekap Semua Staf". Menyimpan ulang dengan nama &amp; periode yang sama akan memperbarui laporan sebelumnya.</div>
+      <div class="preview-box" id="previewBox"></div>
+    </div>
+
+    <div class="nav-row no-print">
+      <button class="action ghost" id="btnBack" onclick="goStep(currentStep-1)">&larr; Kembali</button>
+      <div class="nav-right">
+        <button class="action" id="btnNext" onclick="goStep(currentStep+1)">Lanjut &rarr;</button>
+        <button class="action primary" onclick="simpanKePusat()" id="btnSimpanPusat" style="display:none;">📤 Simpan ke Rekap Pusat</button>
+        <button class="action" onclick="cetakDokumen()" id="btnPrint" style="display:none;">🖨 Cetak</button>
+        <button class="action" onclick="unduhWord()" id="btnWord" style="display:none;">⬇ Unduh Word (.doc)</button>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ================= MODE: REKAP SEMUA STAF (KASUBBAG) ================= -->
+<div class="wrap" id="wrapRekap" style="display:none;">
+  <div class="sheet">
+    <div class="step-title">Rekap Semua Staf</div>
+    <div class="step-desc">Daftar seluruh laporan kinerja staf yang sudah disimpan ke Rekap Pusat.</div>
+    <div class="note-box">📌 Data ini bersifat <b>bersama (online)</b> &mdash; tersimpan di Google Sheets sehingga tetap bisa dilihat siapa pun yang punya link/URL-nya, baik dari dalam maupun luar Claude, dari perangkat mana pun.</div>
+
+    <div class="note-box" id="rekapSetupNote" style="display:none; background:#fdeaea; border-color:#e3a3a3; color:#7a2020;">
+      ⚠ Rekap Pusat belum terhubung ke penyimpanan online. Klik "⚙ Pengaturan" di bawah, tempel URL Web App Google Apps Script, lalu Simpan. Panduan lengkap ada di file <b>PANDUAN_SETUP_REKAP_ONLINE.docx / .txt</b> yang saya sertakan.
+    </div>
+
+    <div class="rekap-toolbar no-print">
+      <input id="cariRekap" placeholder="Cari nama pegawai / jabatan..." oninput="renderRekapTable()">
+      <button class="action" onclick="muatRekap()">🔄 Muat Ulang</button>
+      <button class="action ghost" onclick="toggleSetting()">⚙ Pengaturan</button>
+      <button class="action primary" onclick="unduhSemuaWord()">⬇ Unduh Semua (Word)</button>
+    </div>
+
+    <div class="rekap-toolbar no-print" id="apiUrlBar" style="display:none; background:#f3f6fa; padding:12px; border-radius:8px; border:1px solid var(--line);">
+      <div style="flex-basis:100%; font-size:12.5px; color:var(--muted); margin-bottom:2px;">URL Web App Google Apps Script (diakhiri <code>/exec</code>) &mdash; sekali diisi, tersimpan di perangkat/browser ini saja:</div>
+      <input id="apiUrlInput" placeholder="https://script.google.com/macros/s/xxxxx/exec">
+      <input id="apiKeyInput" placeholder="Kunci rahasia (opsional)" style="flex:0 0 200px;">
+      <button class="action" onclick="simpanApiUrl()">💾 Simpan</button>
+      <div style="flex-basis:100%; font-size:12px;" id="apiUrlStatus"></div>
+    </div>
+
+    <div id="rekapStatus">Memuat data...</div>
+
+    <div style="overflow:auto;">
+      <table class="rpt" id="tblRekap">
+        <thead>
+          <tr>
+            <th style="width:4%;">No.</th><th style="width:20%;">Nama Pegawai</th><th style="width:20%;">Jabatan</th>
+            <th style="width:16%;">Periode</th><th style="width:12%;">Rata-rata Capaian</th>
+            <th style="width:16%;">Terakhir Disimpan</th><th class="no-print" style="width:12%;">Aksi</th>
+          </tr>
+        </thead>
+        <tbody id="rekapBody"></tbody>
+      </table>
+    </div>
+
+    <div id="rekapDetailWrap">
+      <div class="detail-head no-print">
+        <div class="step-title" style="font-size:16px; margin:0;">Detail Laporan</div>
+        <div style="display:flex; gap:8px;">
+          <button class="action ghost" onclick="tutupDetailRekap()">Tutup</button>
+          <button class="action" onclick="cetakDetailRekap()">🖨 Cetak</button>
+          <button class="action primary" onclick="unduhDetailRekap()">⬇ Unduh Word</button>
+        </div>
+      </div>
+      <div class="preview-box" id="rekapDetailBox"></div>
+    </div>
+  </div>
+</div>
+
+<div id="printArea"></div>
+
+<script>
+/* ============ WIZARD STATE ============ */
+const stepLabels = ['Info Umum','Kinerja Utama','Aktifitas','Penjelasan','Catatan','Tanda Tangan','Pratinjau'];
+let currentStep = 0;
+let currentMode = 'isi';
+
+/* ============ KONFIGURASI REKAP ONLINE ============
+   Admin/Kasubbag bisa mengisi 2 baris di bawah ini SEKALI SAJA lalu membagikan
+   file HTML ini ke seluruh staf — sehingga semua orang otomatis terhubung ke
+   Rekap Pusat yang sama tanpa perlu isi Pengaturan satu-satu.
+   Kosongkan (biarkan '') jika ingin tiap orang mengisi sendiri lewat menu
+   "⚙ Pengaturan" di halaman Rekap Semua Staf. */
+const APPS_SCRIPT_URL_DEFAULT = 'https://script.google.com/macros/s/AKfycbweoq3CTqs97jZyQp2ZDVQlbeEgZZJ3sGOKmb_ywstXcitac6DMh3bK2seeOfo5GEyu/exec'; // contoh: 'https://script.google.com/macros/s/AKfycbxxxxxxxx/exec'
+const APPS_SCRIPT_KEY_DEFAULT = 'kinerja26'; // opsional, harus sama dengan SECRET_KEY di Code.gs
+const META_IDS = ['bulanAwal','bulanAkhir','tahunLaporan','namaPegawai','namaJabatan','upaya','hambatan','rencana','catatanAtasan','tanggapan','jabatanAtasan','namaAtasan','nipAtasan','jabatanPelapor','namaPelapor','nipPelapor'];
+
+/* ============ AKSES ADMIN (Rekap & Pengaturan) ============
+   PIN ini hanya penghalang sederhana di sisi browser (bukan keamanan
+   tingkat server) — cukup untuk mencegah staf biasa membuka menu
+   Rekap/Pengaturan secara tidak sengaja. Ganti nilainya kapan saja. */
+const ADMIN_PIN = '654321';
+let isAdmin = false;
+
+function mintaPinAdmin(){
+  if(isAdmin) return true;
+  const input = prompt('Menu ini khusus Admin/Kasubbag.\nMasukkan PIN Admin:');
+  if(input === null) return false; // dibatalkan
+  if(input === ADMIN_PIN){
+    isAdmin = true;
+    return true;
+  }
+  alert('PIN salah. Akses ditolak.');
+  return false;
+}
+
+function buildStepper(){
+  const el = document.getElementById('stepper');
+  el.innerHTML = stepLabels.map((lbl,i)=>`
+    <div class="step-pill" data-i="${i}" onclick="goStep(${i})">
+      <span class="num">${i+1}</span>${lbl}
+    </div>`).join('');
+}
+
+function goStep(i){
+  if(i<0) i=0;
+  if(i>stepLabels.length-1) i=stepLabels.length-1;
+  currentStep = i;
+  document.querySelectorAll('.step-panel').forEach(p=>{
+    p.classList.toggle('active', +p.dataset.step === i);
+  });
+  document.querySelectorAll('.step-pill').forEach((p,idx)=>{
+    p.classList.toggle('active', idx===i);
+    p.classList.toggle('done', idx<i);
+  });
+  document.getElementById('btnBack').disabled = (i===0);
+  const isLast = (i===stepLabels.length-1);
+  document.getElementById('btnNext').style.display = isLast ? 'none' : 'inline-block';
+  document.getElementById('btnSimpanPusat').style.display = isLast ? 'inline-block' : 'none';
+  document.getElementById('btnPrint').style.display = isLast ? 'inline-block' : 'none';
+  document.getElementById('btnWord').style.display = isLast ? 'inline-block' : 'none';
+  if(isLast){ document.getElementById('previewBox').innerHTML = buildReportHTML(currentData()); }
+  window.scrollTo({top:0, behavior:'smooth'});
+}
+
+/* ============ MODE SWITCH ============ */
+function switchMode(m){
+  if(m==='rekap' && !mintaPinAdmin()) return; // staf tanpa PIN admin tidak bisa masuk mode Rekap
+
+  currentMode = m;
+  document.getElementById('wrapIsi').style.display = (m==='isi') ? 'block' : 'none';
+  document.getElementById('wrapRekap').style.display = (m==='rekap') ? 'block' : 'none';
+  document.getElementById('stepper').style.display = (m==='isi') ? 'flex' : 'none';
+  document.getElementById('btnReset').style.display = (m==='isi') ? 'inline-block' : 'none';
+  document.getElementById('btnModeIsi').classList.toggle('active', m==='isi');
+  document.getElementById('btnModeRekap').classList.toggle('active', m==='rekap');
+  if(m==='rekap'){ muatRekap(); }
+  window.scrollTo({top:0, behavior:'smooth'});
+}
+
+/* ============ DATA MODEL ============ */
+let kinerjaGroups = [];
+let aktifitasRows = [];
+
+function blankIndikator(){ return {indikator:'', capaianLalu:'', satuan:'', target:'', realisasi:''}; }
+function blankGroup(){ return {kinerjaUtama:'', indikators:[blankIndikator()]}; }
+function blankAktifitas(){ return {aktifitas:'', capaianLalu:'', satuan:'', target:'', realisasi:''}; }
+
+function currentData(){
+  const d = { kinerjaGroups: JSON.parse(JSON.stringify(kinerjaGroups)), aktifitasRows: JSON.parse(JSON.stringify(aktifitasRows)) };
+  META_IDS.forEach(id=>{ d[id] = val(id); });
+  return d;
+}
+
+function fillMeta(s){
+  META_IDS.forEach(id=>{ if(s[id]!==undefined){ const el=document.getElementById(id); if(el) el.value = s[id]; } });
+}
+
+/* ============ STORAGE UNIVERSAL (jalan di dalam ATAU di luar Claude) ============
+   Di dalam Claude: pakai window.storage (Artifact storage).
+   Di luar Claude (file dibuka langsung di browser): pakai localStorage. */
+async function storageGet(key){
+  if(typeof window.storage!=='undefined' && window.storage){
+    try{ const r = await window.storage.get(key, false); return r ? r.value : null; }catch(e){ return null; }
+  }
+  try{ return localStorage.getItem(key); }catch(e){ return null; }
+}
+async function storageSet(key, value){
+  if(typeof window.storage!=='undefined' && window.storage){
+    try{ await window.storage.set(key, value, false); return; }catch(e){ /* fallback di bawah */ }
+  }
+  try{ localStorage.setItem(key, value); }catch(e){ /* tidak bisa menyimpan, abaikan */ }
+}
+async function storageDelete(key){
+  if(typeof window.storage!=='undefined' && window.storage){
+    try{ await window.storage.delete(key, false); return; }catch(e){ /* fallback di bawah */ }
+  }
+  try{ localStorage.removeItem(key); }catch(e){ /* abaikan */ }
+}
+
+/* ============ PERSONAL DRAFT (tersimpan lokal per perangkat) ============ */
+let saveTimer=null;
+function scheduleSave(){ clearTimeout(saveTimer); saveTimer=setTimeout(saveState, 600); }
+
+async function saveState(){
+  await storageSet('draft', JSON.stringify(currentData()));
+}
+
+async function loadInitial(){
+  try{
+    const raw = await storageGet('draft');
+    if(raw){
+      const s = JSON.parse(raw);
+      kinerjaGroups = (s.kinerjaGroups && s.kinerjaGroups.length) ? s.kinerjaGroups : [blankGroup(), blankGroup()];
+      aktifitasRows = (s.aktifitasRows && s.aktifitasRows.length) ? s.aktifitasRows : [blankAktifitas(),blankAktifitas(),blankAktifitas(),blankAktifitas(),blankAktifitas()];
+      renderKinerja(); renderAktifitas();
+      fillMeta(s);
+      return;
+    }
+  }catch(e){ /* belum ada draft tersimpan, lanjut ke default */ }
+  kinerjaGroups = [blankGroup(), blankGroup()];
+  aktifitasRows = [blankAktifitas(),blankAktifitas(),blankAktifitas(),blankAktifitas(),blankAktifitas()];
+  renderKinerja(); renderAktifitas();
+  document.getElementById('tahunLaporan').value='2026';
+  document.getElementById('jabatanAtasan').value='Kepala Sub Bagian Perencanaan dan Pelaporan';
+}
+
+async function resetForm(){
+  if(!confirm('Kosongkan seluruh isian formulir? (Laporan yang sudah disimpan ke Rekap Pusat tidak akan terhapus)')) return;
+  await storageDelete('draft');
+  kinerjaGroups=[blankGroup(), blankGroup()];
+  aktifitasRows=[blankAktifitas(),blankAktifitas(),blankAktifitas(),blankAktifitas(),blankAktifitas()];
+  renderKinerja(); renderAktifitas();
+  document.getElementById('bulanAwal').value='';
+  document.getElementById('bulanAkhir').value='';
+  document.getElementById('tahunLaporan').value='2026';
+  ['namaPegawai','namaJabatan','upaya','hambatan','rencana','catatanAtasan','tanggapan','jabatanPelapor','namaPelapor','nipPelapor'].forEach(id=>document.getElementById(id).value='');
+  document.getElementById('jabatanAtasan').value='Kepala Sub Bagian Perencanaan dan Pelaporan';
+  document.getElementById('namaAtasan').value='';
+  document.getElementById('nipAtasan').value='';
+  goStep(0);
+}
+
+/* ============ CENTRAL REKAP (backend online: Google Apps Script) ============ */
+function slug(s){ return String(s||'').trim().toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_+|_+$/g,'') || 'x'; }
+function buildReportId(d){ return slug(d.namaPegawai)+'__'+slug(d.tahunLaporan)+'__'+slug(d.bulanAwal)+'-'+slug(d.bulanAkhir); }
+
+async function getApiUrl(){
+  if(APPS_SCRIPT_URL_DEFAULT) return APPS_SCRIPT_URL_DEFAULT;
+  const v = await storageGet('apiUrl');
+  return (v||'').trim();
+}
+async function getApiKey(){
+  if(APPS_SCRIPT_URL_DEFAULT) return APPS_SCRIPT_KEY_DEFAULT;
+  const v = await storageGet('apiKey');
+  return (v||'').trim();
+}
+
+function toggleSetting(){
+  const p = document.getElementById('apiUrlBar');
+  const willOpen = (p.style.display==='none' || !p.style.display);
+  if(willOpen && !mintaPinAdmin()) return; // hanya admin yang boleh membuka/menutup pengaturan URL
+  p.style.display = willOpen ? 'flex' : 'none';
+}
+
+async function simpanApiUrl(){
+  if(!mintaPinAdmin()) return; // pengaman tambahan: hanya admin yang boleh mengubah URL Rekap Pusat
+  if(APPS_SCRIPT_URL_DEFAULT){
+    alert('URL Rekap Pusat sudah diatur permanen oleh admin di dalam file ini, tidak perlu diisi ulang.');
+    return;
+  }
+  const u = (document.getElementById('apiUrlInput').value||'').trim();
+  const k = (document.getElementById('apiKeyInput').value||'').trim();
+  await storageSet('apiUrl', u);
+  await storageSet('apiKey', k);
+  document.getElementById('apiUrlStatus').textContent = u ? 'Tersimpan di perangkat ini. Memuat data...' : 'URL dikosongkan.';
+  muatRekap();
+}
+
+async function apiCall(action, extra){
+  const apiUrl = await getApiUrl();
+  if(!apiUrl) throw new Error('URL Rekap Pusat belum diatur.');
+  const key = await getApiKey();
+  if(action==='list'){
+    let url = apiUrl + (apiUrl.includes('?') ? '&' : '?') + 'action=list';
+    if(key) url += '&key=' + encodeURIComponent(key);
+    const res = await fetch(url, { method:'GET' });
+    return await res.json();
+  }
+  const payload = Object.assign({ action, key }, extra||{});
+  const res = await fetch(apiUrl, {
+    method:'POST',
+    headers:{'Content-Type':'text/plain;charset=utf-8'}, // hindari CORS preflight ke Apps Script
+    body: JSON.stringify(payload)
+  });
+  return await res.json();
+}
+
+async function simpanKePusat(){
+  const data = currentData();
+  if(!data.namaPegawai.trim()){ alert('Isi Nama Pegawai terlebih dahulu sebelum menyimpan ke Rekap Pusat.'); return; }
+  const apiUrl = await getApiUrl();
+  if(!apiUrl){
+    alert('URL Rekap Pusat belum diatur. Buka menu "Rekap Semua Staf" > "⚙ Pengaturan" untuk menghubungkan aplikasi ini ke penyimpanan online terlebih dahulu.');
+    switchMode('rekap');
+    return;
+  }
+  const btn = document.getElementById('btnSimpanPusat');
+  const label = btn.textContent;
+  btn.disabled = true; btn.textContent = 'Menyimpan...';
+  try{
+    const id = buildReportId(data);
+    const record = Object.assign({}, data, { savedAt: new Date().toISOString(), reportId:id });
+    const json = await apiCall('save', { record });
+    if(json && json.ok){
+      alert('Laporan atas nama "'+data.namaPegawai+'" berhasil disimpan ke Rekap Subbag PP (online).\nDapat dilihat siapa pun yang memiliki akses.');
+    }else{
+      alert('Gagal menyimpan ke Rekap Pusat: '+(json && json.error ? json.error : 'respons server tidak dikenali.'));
+    }
+  }catch(e){
+    alert('Gagal terhubung ke Rekap Pusat. Periksa koneksi internet dan URL yang sudah diatur.\n\nDetail: '+(e && e.message ? e.message : e));
+  }
+  btn.disabled = false; btn.textContent = label;
+}
+
+let rekapRecords = [];
+let rekapDetailData = null;
+
+async function muatRekap(){
+  const status = document.getElementById('rekapStatus');
+  const body = document.getElementById('rekapBody');
+  const apiUrl = await getApiUrl();
+
+  const urlInput = document.getElementById('apiUrlInput');
+  const keyInput = document.getElementById('apiKeyInput');
+  if(APPS_SCRIPT_URL_DEFAULT){
+    urlInput.value = APPS_SCRIPT_URL_DEFAULT; urlInput.disabled = true;
+    keyInput.value = APPS_SCRIPT_KEY_DEFAULT; keyInput.disabled = true;
+  }else{
+    if(!urlInput.value) urlInput.value = apiUrl;
+    if(!keyInput.value) keyInput.value = await getApiKey();
+  }
+
+  document.getElementById('rekapSetupNote').style.display = apiUrl ? 'none' : 'block';
+  if(!apiUrl){
+    status.textContent = 'Belum terhubung ke Rekap Pusat online.';
+    rekapRecords = []; renderRekapTable();
+    return;
+  }
+
+  status.textContent = 'Memuat data...';
+  body.innerHTML = '';
+  try{
+    const json = await apiCall('list');
+    if(json && json.ok){
+      const records = json.records || [];
+      records.sort((a,b)=> String(a.namaPegawai||'').localeCompare(String(b.namaPegawai||''), 'id'));
+      rekapRecords = records;
+      status.textContent = records.length ? (records.length+' laporan ditemukan (data online).') : 'Belum ada laporan yang disimpan ke Rekap Pusat.';
+    }else{
+      status.textContent = 'Gagal memuat data: '+(json && json.error ? json.error : 'respons server tidak dikenali.');
+    }
+  }catch(e){
+    status.textContent = 'Gagal terhubung ke Rekap Pusat. Periksa koneksi internet / URL yang sudah diatur.\nDetail: '+(e && e.message ? e.message : e);
+  }
+  renderRekapTable();
+}
+
+async function hapusRekap(idx){
+  const r = rekapRecords[idx];
+  if(!r) return;
+  if(!confirm('Hapus laporan atas nama "'+r.namaPegawai+'" dari Rekap Pusat? Tindakan ini tidak dapat dibatalkan.')) return;
+  try{
+    const json = await apiCall('delete', { reportId: r.reportId });
+    if(json && json.ok){ muatRekap(); }
+    else{ alert('Gagal menghapus: '+(json && json.error ? json.error : 'respons server tidak dikenali.')); }
+  }catch(e){
+    alert('Gagal terhubung ke Rekap Pusat: '+(e && e.message ? e.message : e));
+  }
+}
+
+function ringkasanCapaian(r){
+  const nums=[];
+  (r.kinerjaGroups||[]).forEach(g=>(g.indikators||[]).forEach(ind=>{
+    const t = parseFloat(String(ind.target).replace(',','.').replace(/[^0-9.\-]/g,''));
+    const re = parseFloat(String(ind.realisasi).replace(',','.').replace(/[^0-9.\-]/g,''));
+    if(!isNaN(t) && t!==0 && !isNaN(re)) nums.push(re/t*100);
+  }));
+  if(!nums.length) return '-';
+  const avg = nums.reduce((a,b)=>a+b,0)/nums.length;
+  return avg.toFixed(1)+' %';
+}
+
+function renderRekapTable(){
+  const q = (document.getElementById('cariRekap').value||'').toLowerCase().trim();
+  const body = document.getElementById('rekapBody');
+  const filtered = rekapRecords.filter(r=> !q || String(r.namaPegawai||'').toLowerCase().includes(q) || String(r.namaJabatan||'').toLowerCase().includes(q));
+  body.innerHTML='';
+  if(!filtered.length){
+    body.innerHTML = '<tr><td colspan="7" style="text-align:center; color:var(--muted); padding:16px;">Tidak ada data.</td></tr>';
+    return;
+  }
+  filtered.forEach((r,i)=>{
+    const idxGlobal = rekapRecords.indexOf(r);
+    const periode = escapeHtml(r.bulanAwal)+' s/d '+escapeHtml(r.bulanAkhir)+' '+escapeHtml(r.tahunLaporan);
+    const disimpan = r.savedAt ? new Date(r.savedAt).toLocaleString('id-ID') : '-';
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td class="center">${i+1}.</td>
+      <td>${escapeHtml(r.namaPegawai)}</td>
+      <td>${escapeHtml(r.namaJabatan)}</td>
+      <td class="center">${periode}</td>
+      <td class="center">${ringkasanCapaian(r)}</td>
+      <td class="center" style="font-size:11.5px;">${disimpan}</td>
+      <td class="no-print col-actions">
+        <div class="group-actions">
+          <button type="button" class="add-btn" style="padding:3px 8px; font-size:11px;" onclick="lihatDetailRekap(${idxGlobal})">Lihat</button>
+          <button type="button" class="row-btn" onclick="hapusRekap(${idxGlobal})">Hapus</button>
+        </div>
+      </td>`;
+    body.appendChild(tr);
+  });
+}
+
+function lihatDetailRekap(idx){
+  rekapDetailData = rekapRecords[idx];
+  document.getElementById('rekapDetailBox').innerHTML = buildReportHTML(rekapDetailData);
+  document.getElementById('rekapDetailWrap').style.display = 'block';
+  document.getElementById('rekapDetailWrap').scrollIntoView({behavior:'smooth', block:'start'});
+}
+function tutupDetailRekap(){
+  document.getElementById('rekapDetailWrap').style.display = 'none';
+  rekapDetailData = null;
+}
+function cetakDetailRekap(){
+  if(!rekapDetailData) return;
+  document.getElementById('printArea').innerHTML = buildReportHTML(rekapDetailData);
+  window.print();
+}
+function unduhDetailRekap(){
+  if(!rekapDetailData) return;
+  triggerWordDownload(buildReportHTML(rekapDetailData), rekapDetailData.namaPegawai);
+}
+function unduhSemuaWord(){
+  if(!rekapRecords.length){ alert('Belum ada data untuk diunduh.'); return; }
+  const bodies = rekapRecords.map(r=>'<div style="page-break-after:always;">'+buildReportHTML(r)+'</div>').join('');
+  triggerWordDownload(bodies, 'Rekap_Semua_Staf');
+}
+
+/* ============ RENDER: KINERJA UTAMA ============ */
+function renderKinerja(){
+  const body = document.getElementById('kinerjaBody');
+  body.innerHTML = '';
+  kinerjaGroups.forEach((g, gi)=>{
+    g.indikators.forEach((ind, ii)=>{
+      const tr = document.createElement('tr');
+      let html = '';
+      if(ii===0){
+        html += `<td class="center" rowspan="${g.indikators.length}">${gi+1}.</td>`;
+        html += `<td rowspan="${g.indikators.length}"><textarea data-role="kinerjaUtama" data-gi="${gi}" oninput="onKinerjaInput(event)">${escapeHtml(g.kinerjaUtama)}</textarea></td>`;
+      }
+      html += `<td><textarea data-role="indikator" data-gi="${gi}" data-ii="${ii}" oninput="onKinerjaInput(event)">${escapeHtml(ind.indikator)}</textarea></td>`;
+      html += `<td><input data-role="capaianLalu" data-gi="${gi}" data-ii="${ii}" oninput="onKinerjaInput(event)" value="${escapeHtml(ind.capaianLalu)}"></td>`;
+      html += `<td><input data-role="satuan" data-gi="${gi}" data-ii="${ii}" oninput="onKinerjaInput(event)" value="${escapeHtml(ind.satuan)}"></td>`;
+      html += `<td><input data-role="target" data-gi="${gi}" data-ii="${ii}" oninput="onKinerjaInput(event)" value="${escapeHtml(ind.target)}"></td>`;
+      html += `<td><input data-role="realisasi" data-gi="${gi}" data-ii="${ii}" oninput="onKinerjaInput(event)" value="${escapeHtml(ind.realisasi)}"></td>`;
+      html += `<td class="autopct" id="pct_k_${gi}_${ii}">${hitungPersen(ind.target, ind.realisasi)}</td>`;
+      if(ii===0){
+        html += `<td class="no-print col-actions" rowspan="${g.indikators.length}">
+                    <div class="group-actions">
+                      <button type="button" class="add-btn" style="padding:3px 8px; font-size:11px;" onclick="addIndikator(${gi})">+ Indikator</button>
+                      <button type="button" class="row-btn" onclick="removeGroup(${gi})">Hapus KU</button>
+                    </div>
+                  </td>`;
+      }
+      tr.innerHTML = html;
+      body.appendChild(tr);
+    });
+  });
+  addIndikatorRemoveButtons();
+}
+
+function addIndikatorRemoveButtons(){
+  const body = document.getElementById('kinerjaBody');
+  let rowIndex = 0;
+  kinerjaGroups.forEach((g, gi)=>{
+    g.indikators.forEach((ind, ii)=>{
+      const tr = body.children[rowIndex];
+      if(g.indikators.length>1 && tr){
+        const indTd = ii===0 ? tr.children[2] : tr.children[0];
+        if(indTd && !indTd.querySelector('.mini-remove')){
+          const btn = document.createElement('button');
+          btn.type='button'; btn.className='row-btn mini-remove no-print';
+          btn.textContent='Hapus indikator';
+          btn.onclick=()=>removeIndikator(gi, ii);
+          indTd.appendChild(document.createElement('br'));
+          indTd.appendChild(btn);
+        }
+      }
+      rowIndex++;
+    });
+  });
+}
+
+function onKinerjaInput(e){
+  const role=e.target.dataset.role, gi=+e.target.dataset.gi;
+  if(role==='kinerjaUtama'){ kinerjaGroups[gi].kinerjaUtama = e.target.value; }
+  else{
+    const ii=+e.target.dataset.ii;
+    kinerjaGroups[gi].indikators[ii][role] = e.target.value;
+    if(role==='target'||role==='realisasi'){
+      const cell=document.getElementById(`pct_k_${gi}_${ii}`);
+      if(cell) cell.textContent = hitungPersen(kinerjaGroups[gi].indikators[ii].target, kinerjaGroups[gi].indikators[ii].realisasi);
+    }
+  }
+  scheduleSave();
+}
+
+function addKinerjaGroup(){ kinerjaGroups.push(blankGroup()); renderKinerja(); scheduleSave(); }
+function removeGroup(gi){
+  if(kinerjaGroups.length<=1){ alert('Minimal harus ada 1 Kinerja Utama.'); return; }
+  if(!confirm('Hapus Kinerja Utama ini beserta seluruh indikatornya?')) return;
+  kinerjaGroups.splice(gi,1); renderKinerja(); scheduleSave();
+}
+function addIndikator(gi){ kinerjaGroups[gi].indikators.push(blankIndikator()); renderKinerja(); scheduleSave(); }
+function removeIndikator(gi, ii){
+  if(kinerjaGroups[gi].indikators.length<=1){ alert('Minimal harus ada 1 indikator.'); return; }
+  kinerjaGroups[gi].indikators.splice(ii,1); renderKinerja(); scheduleSave();
+}
+
+/* ============ RENDER: AKTIFITAS ============ */
+function renderAktifitas(){
+  const body = document.getElementById('aktifitasBody');
+  body.innerHTML='';
+  aktifitasRows.forEach((r, i)=>{
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td class="center">${i+1}.</td>
+      <td><textarea data-role="aktifitas" data-i="${i}" oninput="onAktifitasInput(event)">${escapeHtml(r.aktifitas)}</textarea></td>
+      <td><input data-role="capaianLalu" data-i="${i}" oninput="onAktifitasInput(event)" value="${escapeHtml(r.capaianLalu)}"></td>
+      <td><input data-role="satuan" data-i="${i}" oninput="onAktifitasInput(event)" value="${escapeHtml(r.satuan)}"></td>
+      <td><input data-role="target" data-i="${i}" oninput="onAktifitasInput(event)" value="${escapeHtml(r.target)}"></td>
+      <td><input data-role="realisasi" data-i="${i}" oninput="onAktifitasInput(event)" value="${escapeHtml(r.realisasi)}"></td>
+      <td class="autopct" id="pct_a_${i}">${hitungPersen(r.target, r.realisasi)}</td>
+      <td class="no-print col-actions"><button type="button" class="row-btn" onclick="removeAktifitas(${i})">Hapus</button></td>
+    `;
+    body.appendChild(tr);
+  });
+}
+function onAktifitasInput(e){
+  const role=e.target.dataset.role, i=+e.target.dataset.i;
+  aktifitasRows[i][role]=e.target.value;
+  if(role==='target'||role==='realisasi'){
+    const cell=document.getElementById('pct_a_'+i);
+    if(cell) cell.textContent = hitungPersen(aktifitasRows[i].target, aktifitasRows[i].realisasi);
+  }
+  scheduleSave();
+}
+function addAktifitasRow(){ aktifitasRows.push(blankAktifitas()); renderAktifitas(); scheduleSave(); }
+function removeAktifitas(i){
+  if(aktifitasRows.length<=1){ alert('Minimal harus ada 1 baris aktifitas.'); return; }
+  aktifitasRows.splice(i,1); renderAktifitas(); scheduleSave();
+}
+
+/* ============ HELPERS ============ */
+function hitungPersen(target, realisasi){
+  const t = parseFloat(String(target).replace(',','.').replace(/[^0-9.\-]/g,''));
+  const r = parseFloat(String(realisasi).replace(',','.').replace(/[^0-9.\-]/g,''));
+  if(!isNaN(t) && t!==0 && !isNaN(r)){ return (r/t*100).toFixed(1)+' %'; }
+  return '';
+}
+function escapeHtml(str){
+  return String(str||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function val(id){ const el=document.getElementById(id); return el? el.value : ''; }
+
+/* ============ BUILD PRINTABLE / EXPORT HTML ============ */
+function buildReportHTML(data){
+  const d = data || currentData();
+  const judul = `LAPORAN PENGUKURAN KINERJA STAF<br>BULAN ${escapeHtml(d.bulanAwal)} S/D BULAN ${escapeHtml(d.bulanAkhir)} TAHUN ${escapeHtml(d.tahunLaporan)}`;
+
+  let kinerjaRows = '';
+  (d.kinerjaGroups||[]).forEach((g, gi)=>{
+    g.indikators.forEach((ind, ii)=>{
+      kinerjaRows += '<tr>';
+      if(ii===0){
+        kinerjaRows += `<td style="text-align:center;" rowspan="${g.indikators.length}">${gi+1}.</td>`;
+        kinerjaRows += `<td rowspan="${g.indikators.length}">${escapeHtml(g.kinerjaUtama).replace(/\n/g,'<br>')}</td>`;
+      }
+      kinerjaRows += `<td>${escapeHtml(ind.indikator).replace(/\n/g,'<br>')}</td>`;
+      kinerjaRows += `<td style="text-align:center;">${escapeHtml(ind.capaianLalu)}</td>`;
+      kinerjaRows += `<td style="text-align:center;">${escapeHtml(ind.satuan)}</td>`;
+      kinerjaRows += `<td style="text-align:center;">${escapeHtml(ind.target)}</td>`;
+      kinerjaRows += `<td style="text-align:center;">${escapeHtml(ind.realisasi)}</td>`;
+      kinerjaRows += `<td style="text-align:center;">${hitungPersen(ind.target, ind.realisasi)}</td>`;
+      kinerjaRows += '</tr>';
+    });
+  });
+
+  let aktifitasHtmlRows = '';
+  (d.aktifitasRows||[]).forEach((r, i)=>{
+    aktifitasHtmlRows += `<tr>
+      <td style="text-align:center;">${i+1}.</td>
+      <td>${escapeHtml(r.aktifitas).replace(/\n/g,'<br>')}</td>
+      <td style="text-align:center;">${escapeHtml(r.capaianLalu)}</td>
+      <td style="text-align:center;">${escapeHtml(r.satuan)}</td>
+      <td style="text-align:center;">${escapeHtml(r.target)}</td>
+      <td style="text-align:center;">${escapeHtml(r.realisasi)}</td>
+      <td style="text-align:center;">${hitungPersen(r.target, r.realisasi)}</td>
+    </tr>`;
+  });
+
+  return `
+    <div class="title">${judul}</div>
+    <div class="meta"><b>NAMA PEGAWAI</b>: ${escapeHtml(d.namaPegawai)}</div>
+    <div class="meta"><b>NAMA JABATAN</b>: ${escapeHtml(d.namaJabatan)}</div>
+
+    <h3>A. Kinerja Utama</h3>
+    <table>
+      <tr>
+        <th rowspan="2">No.</th><th rowspan="2">Kinerja Utama</th><th rowspan="2">Indikator</th>
+        <th rowspan="2">Capaian Tahun Lalu</th><th rowspan="2">Satuan</th>
+        <th colspan="3">TARGET DAN CAPAIAN</th>
+      </tr>
+      <tr><th>Target</th><th>Realisasi s.d Bulan Ini</th><th>% Capaian</th></tr>
+      ${kinerjaRows}
+    </table>
+
+    <h3>B. Aktifitas / Rencana Aksi</h3>
+    <table>
+      <tr>
+        <th>No.</th><th>Aktifitas yang berhubungan dengan Indikator</th>
+        <th>Capaian Aktifitas Tahun Lalu</th><th>Satuan Indikator Aktifitas</th>
+        <th>Target aktifitas</th><th>realisasi aktifitas</th><th>Capaian %</th>
+      </tr>
+      ${aktifitasHtmlRows}
+    </table>
+
+    <h3>Penjelasan per Indikator Kinerja</h3>
+    <div class="txt-block"><b>Upaya :</b><div class="txt-box">${escapeHtml(d.upaya)}</div></div>
+    <div class="txt-block"><b>Hambatan :</b><div class="txt-box">${escapeHtml(d.hambatan)}</div></div>
+    <div class="txt-block"><b>Rencana Tindak Lanjut :</b><div class="txt-box">${escapeHtml(d.rencana)}</div></div>
+    <div class="txt-block"><b>Catatan atasan langsung : (diisi oleh ess IV)</b><div class="txt-box">${escapeHtml(d.catatanAtasan)}</div></div>
+    <div class="txt-block"><b>Tanggapan : (diisi oleh staf terkait catatan atasan langsung)</b><div class="txt-box">${escapeHtml(d.tanggapan)}</div></div>
+
+    <table style="border:none; margin-top:20px;">
+      <tr style="border:none;">
+        <td class="sign-td" style="border:none;">
+          Mengetahui Atasan Langsung<br>
+          ${escapeHtml(d.jabatanAtasan)}
+          <div class="sign-space"></div>
+          <span class="sign-name">${escapeHtml(d.namaAtasan)}</span><br>
+          NIP. ${escapeHtml(d.nipAtasan)}
+        </td>
+        <td class="sign-td" style="border:none;">
+          Yang Melaporkan,<br>
+          ${escapeHtml(d.jabatanPelapor)}
+          <div class="sign-space"></div>
+          <span class="sign-name">${escapeHtml(d.namaPelapor)}</span><br>
+          NIP. ${escapeHtml(d.nipPelapor)}
+        </td>
+      </tr>
+    </table>
+  `;
+}
+
+function cetakDokumen(){
+  document.getElementById('printArea').innerHTML = buildReportHTML(currentData());
+  window.print();
+}
+
+function unduhWord(){
+  triggerWordDownload(buildReportHTML(currentData()), val('namaPegawai'));
+}
+
+function triggerWordDownload(bodyHtml, namaForFile){
+  const html = `
+    <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
+    <head>
+      <meta charset="utf-8">
+      <title>Laporan Kinerja Staf</title>
+      <!--[if gte mso 9]>
+      <xml><w:WordDocument><w:View>Print</w:View><w:Zoom>100</w:Zoom></w:WordDocument></xml>
+      <![endif]-->
+      <style>
+        @page{ size: 210mm 330mm; margin: 20mm 18mm; }
+        body{font-family:'Times New Roman', Times, serif; font-size:12.5pt; color:#000;}
+        table{border-collapse:collapse; width:100%; margin-bottom:10px;}
+        td, th{border:1px solid #000; padding:4px 6px; vertical-align:top; font-size:11.5pt;}
+        th{background:#dfe6ee; text-align:center; font-weight:bold;}
+        .title{text-align:center; font-weight:bold; font-size:14pt; margin-bottom:10px; line-height:1.4;}
+        .meta{margin:3px 0; font-size:12.5pt;}
+        .meta b{display:inline-block; width:130px;}
+        h3{font-size:12.5pt; margin:22px 0 6px;}
+        .txt-block{margin-bottom:12px;}
+        .txt-block b{display:block; margin-bottom:3px;}
+        .txt-box{border:1px solid #666; min-height:40px; padding:6px; white-space:pre-wrap;}
+        .sign-td{width:50%; text-align:center; vertical-align:top; font-size:12.5pt; border:none;}
+        .sign-space{height:60px;}
+        .sign-name{font-weight:bold; text-decoration:underline;}
+      </style>
+    </head>
+    <body>${bodyHtml}</body>
+    </html>`;
+
+  const blob = new Blob(['\ufeff', html], { type: 'application/msword' });
+  const nama = (namaForFile||'laporan_kinerja').trim().replace(/[^a-zA-Z0-9]+/g,'_');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `Laporan_Kinerja_${nama}.doc`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+}
+
+/* ============ INIT ============ */
+window.addEventListener('DOMContentLoaded', async ()=>{
+  buildStepper();
+  await loadInitial();
+  META_IDS.forEach(id=>{
+    const el=document.getElementById(id);
+    if(el) el.addEventListener('input', scheduleSave);
+  });
+  goStep(0);
+});
+</script>
+</body>
+</html>
