@@ -600,6 +600,7 @@
     <div class="rekap-toolbar no-print">
       <input id="cariPegawaiAdmin" placeholder="🔍 Cari nama pegawai / jabatan..." oninput="renderPegawaiAdminTable()">
       <button class="action primary" onclick="tambahPegawaiBaru()">➕ Tambah Pegawai</button>
+      <button class="action ghost" onclick="bersihkanPegawaiGanda()">🧹 Bersihkan Nama Ganda</button>
     </div>
     <div id="pegawaiAdminStatus" style="font-size:12.5px; color:var(--muted); margin-bottom:10px;"></div>
     <div style="overflow:auto;">
@@ -758,7 +759,39 @@ function onLoginKategoriChange(){
    default 123456 untuk setiap pegawai. */
 let PEGAWAI_LIST = [];
 let PEGAWAI_BY_KEY = {};
-function keyNama(n){ return String(n||'').trim().toLowerCase(); }
+function keyNama(n){ return String(n||'').trim().toLowerCase().replace(/\s+/g,' '); }
+
+/* Gabungkan 2 record pegawai dengan nama sama menjadi 1, sambil
+   mempertahankan data yang paling lengkap (kata sandi non-default,
+   jabatan/kategori yang terisi) agar tidak ada info yang hilang. */
+function gabungPegawai(a, b){
+  return {
+    nama: (a.nama||b.nama||'').trim(),
+    jabatan: a.jabatan || b.jabatan || '',
+    kategori: a.kategori || b.kategori || '',
+    password: (a.password && a.password!=='123456') ? a.password : (b.password || a.password || '123456')
+  };
+}
+
+/* Hapus entri pegawai yang namanya double (sama persis setelah
+   dirapikan spasi & huruf besar/kecil), gabungkan datanya jadi satu. */
+function dedupePegawaiList(list){
+  const byKey = {};
+  const order = [];
+  let removed = 0;
+  list.forEach(p=>{
+    const k = keyNama(p.nama);
+    if(!k) return;
+    if(byKey[k]){
+      byKey[k] = gabungPegawai(byKey[k], p);
+      removed++;
+    }else{
+      byKey[k] = p;
+      order.push(k);
+    }
+  });
+  return { list: order.map(k=>byKey[k]), removed };
+}
 
 function indexPegawai(){
   PEGAWAI_BY_KEY = {};
@@ -771,15 +804,19 @@ async function loadPegawaiData(){
     if(raw){
       const arr = JSON.parse(raw);
       if(Array.isArray(arr) && arr.length){
-        // Sinkronkan dengan daftar pegawai master (STAFF_LIST) agar jumlah
+        // 1) Bersihkan dulu data tersimpan dari kemungkinan nama ganda
+        //    (mis. sisa data lama sebelum pengecekan duplikat aktif).
+        const { list: bersih, removed: dupRemoved } = dedupePegawaiList(arr);
+
+        // 2) Sinkronkan dengan daftar pegawai master (STAFF_LIST) agar jumlah
         // pegawai di Kontrol Admin selalu cocok dengan total pada dropdown,
         // walau ada data tersimpan lama yang jumlahnya belum sesuai.
         // Pegawai yang sudah ada (nama cocok) dipertahankan datanya
         // (termasuk kata sandi yang sudah diubah); pegawai baru dari
         // STAFF_LIST yang belum ada di data tersimpan akan ditambahkan.
         const byKey = {};
-        arr.forEach(p=>{ byKey[keyNama(p.nama)] = p; });
-        const merged = arr.slice();
+        bersih.forEach(p=>{ byKey[keyNama(p.nama)] = p; });
+        const merged = bersih.slice();
         STAFF_LIST.forEach(s=>{
           const k = keyNama(s.nama);
           if(!byKey[k]){
@@ -790,7 +827,7 @@ async function loadPegawaiData(){
         });
         PEGAWAI_LIST = merged;
         indexPegawai();
-        if(merged.length !== arr.length) await savePegawaiData();
+        if(merged.length !== arr.length || dupRemoved > 0) await savePegawaiData();
         return;
       }
     }
@@ -1107,6 +1144,26 @@ async function hapusPegawai(idx){
   await savePegawaiData();
   isiDatalistNama();
   renderPegawaiAdminTable();
+}
+
+/* Tombol "Bersihkan Nama Ganda": mencari nama pegawai yang tercatat
+   lebih dari sekali (setelah dirapikan spasi & huruf besar/kecil),
+   menggabungkannya jadi satu entri, lalu menyimpan & menyegarkan
+   daftar nama di layar login depan supaya tetap sinkron dengan
+   Kelola Pegawai (Admin). */
+async function bersihkanPegawaiGanda(){
+  const { list, removed } = dedupePegawaiList(PEGAWAI_LIST);
+  if(removed === 0){
+    alert('Tidak ditemukan nama pegawai yang ganda. Daftar sudah bersih.');
+    return;
+  }
+  if(!confirm(removed + ' nama pegawai ganda ditemukan dan akan digabung menjadi satu entri per nama. Lanjutkan?')) return;
+  PEGAWAI_LIST = list;
+  indexPegawai();
+  await savePegawaiData();
+  isiDatalistNama();
+  renderPegawaiAdminTable();
+  alert(removed + ' nama pegawai ganda berhasil dibersihkan. Daftar login di halaman depan sudah diperbarui otomatis.');
 }
 
 function onNamaPegawaiInput(){ scheduleSave(); }
@@ -1836,6 +1893,11 @@ function titleCase(s){
     .replace(/(^|[\s\/\-\.,])([a-z\u00C0-\u024F])/g, (m,p1,p2)=>p1+p2.toUpperCase());
 }
 
+function formatJabatanTampil(s){
+  // Title Case biasa, tapi kata ASN / Non ASN tetap huruf besar semua
+  return titleCase(s).replace(/\bAsn\b/g, 'ASN');
+}
+
 function formatTanggalIndo(iso){
   if(!iso) return '-';
   const parts = String(iso).split('-');
@@ -1906,7 +1968,7 @@ function buildReportHTML(data){
     <div class="title">${judul}</div>
     <table class="meta-block" style="border:none; border-bottom:1px solid #000; width:100%; border-collapse:collapse; margin-bottom:14px; padding-bottom:10px;">
       <tr style="border:none;"><td style="border:none; padding:2px 0; font-size:12.5pt; width:130px; font-weight:bold;">Nama Pegawai</td><td style="border:none; padding:2px 0; font-size:12.5pt; width:14px;">:</td><td style="border:none; padding:2px 0; font-size:12.5pt;">${escapeHtml(titleCase(d.namaPegawai))}</td></tr>
-      <tr style="border:none;"><td style="border:none; padding:2px 0; font-size:12.5pt; font-weight:bold;">Nama Jabatan</td><td style="border:none; padding:2px 0; font-size:12.5pt;">:</td><td style="border:none; padding:2px 0; font-size:12.5pt;">${escapeHtml(titleCase(d.namaJabatan))}</td></tr>
+      <tr style="border:none;"><td style="border:none; padding:2px 0; font-size:12.5pt; font-weight:bold;">Nama Jabatan</td><td style="border:none; padding:2px 0; font-size:12.5pt;">:</td><td style="border:none; padding:2px 0; font-size:12.5pt;">${escapeHtml(formatJabatanTampil(d.namaJabatan))}</td></tr>
       <tr style="border:none;"><td style="border:none; padding:2px 0 10px; font-size:12.5pt; font-weight:bold;">Tanggal</td><td style="border:none; padding:2px 0 10px; font-size:12.5pt;">:</td><td style="border:none; padding:2px 0 10px; font-size:12.5pt;">${escapeHtml(titleCase(formatTanggalIndo(d.tanggalLaporan)))}</td></tr>
     </table>
 
