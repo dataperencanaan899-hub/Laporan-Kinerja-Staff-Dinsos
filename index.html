@@ -45,6 +45,13 @@
 
   .wrap{max-width:1180px; margin:20px auto 90px; padding:0 18px;}
   .sheet{background:var(--paper); border:1px solid var(--line); border-radius:10px; padding:30px 34px; box-shadow:0 1px 3px rgba(0,0,0,.06); min-height:420px;}
+  .sync-bar{display:flex; align-items:center; gap:10px; flex-wrap:wrap; background:#f5f3ff; border:1px solid #ddd6fe; border-radius:10px; padding:10px 14px; margin-bottom:14px; font-size:13px;}
+  .sync-bar #syncStatus{flex:1; min-width:220px; color:#4c1d95;}
+  .sync-bar #syncStatus[data-kind="ok"]{color:#15803d;}
+  .sync-bar #syncStatus[data-kind="warn"]{color:#b45309;}
+  .sync-bar #syncStatus[data-kind="err"]{color:#b91c1c; font-weight:600;}
+  .sync-bar #syncStatus[data-kind="busy"]{color:#64748b;}
+  .sync-bar select{border:1px solid #b9c3cf; border-radius:6px; padding:7px 8px; font-size:13px; max-width:300px; background:#fff;}
   .step-panel{display:none;}
   .step-panel.active{display:block; animation:fadein .2s ease;}
   @keyframes fadein{from{opacity:0; transform:translateY(4px);} to{opacity:1; transform:translateY(0);}}
@@ -425,6 +432,11 @@
 
 <!-- ================= MODE: ISI LAPORAN ================= -->
 <div class="wrap" id="wrapIsi">
+  <div class="sync-bar no-print" id="syncBar">
+    <span id="syncStatus">Masuk dahulu untuk memuat laporan tersimpan.</span>
+    <select id="savedReportSelect" onchange="pilihLaporanTersimpan(this.value)" title="Laporan tersimpan di server (per periode)"><option value="">— Laporan tersimpan —</option></select>
+    <button class="add-btn" style="margin-top:0;" onclick="simpanKePusat()">💾 Simpan sekarang</button>
+  </div>
   <div class="sheet">
 
     <!-- STEP 1: INFO UMUM -->
@@ -870,9 +882,58 @@ function indexPegawai(){
   PEGAWAI_LIST.forEach(p=>{ PEGAWAI_BY_KEY[keyNama(p.nama)] = p; });
 }
 
+/* Daftar pegawai + kata sandi disimpan di server sebagai satu "laporan" khusus
+   (reportId __pegawai__) lewat aksi save/list yang sudah ada, sehingga sama di semua PC.
+   Server baru boleh ditimpa setelah daftar dari server berhasil dimuat. */
+const PEGAWAI_REC_ID = '__pegawai__';
+let pegawaiServerReady = false;
+let pegawaiPakaiAksiKhusus = false;
+
+async function ambilPegawaiServer(){
+  const apiUrl = await getApiUrl();
+  if(!apiUrl) return { ok:false, noApi:true };
+  try{
+    // Jalur cepat: aksi khusus di Code.gs (jika sudah dipasang)
+    try{
+      const j2 = await apiCall('getPegawai');
+      if(j2 && j2.ok && 'pegawai' in j2){
+        pegawaiPakaiAksiKhusus = true;
+        const a2 = Array.isArray(j2.pegawai) ? j2.pegawai : (typeof j2.pegawai==='string' && j2.pegawai ? JSON.parse(j2.pegawai) : null);
+        return { ok:true, arr:(a2 && a2.length) ? a2 : null };
+      }
+    }catch(e){ /* belum ada aksi khusus -> jalur lama */ }
+    pegawaiPakaiAksiKhusus = false;
+    const json = await apiCall('list');
+    if(!json || !json.ok) return { ok:false };
+    const rec = (json.records||[]).find(r=>r.reportId===PEGAWAI_REC_ID);
+    if(rec && rec.pegawaiJson){
+      const arr = JSON.parse(rec.pegawaiJson);
+      if(Array.isArray(arr) && arr.length) return { ok:true, arr };
+    }
+    return { ok:true, arr:null };
+  }catch(e){ return { ok:false }; }
+}
+async function kirimPegawaiServer(){
+  if(!pegawaiServerReady) return false;
+  try{
+    if(pegawaiPakaiAksiKhusus){
+      const j2 = await apiCall('savePegawai', { pegawai: PEGAWAI_LIST });
+      return !!(j2 && j2.ok);
+    }
+    const record = { reportId:PEGAWAI_REC_ID, namaPegawai:PEGAWAI_REC_ID, savedAt:new Date().toISOString(), pegawaiJson:JSON.stringify(PEGAWAI_LIST) };
+    const json = await apiCall('save', { record });
+    return !!(json && json.ok);
+  }catch(e){ return false; }
+}
+
 async function loadPegawaiData(){
   try{
-    const raw = await sharedStorageGet('pegawaiData');
+    const srv = await ambilPegawaiServer();
+    pegawaiServerReady = !!srv.ok;
+    let raw = null;
+    if(srv.ok && srv.arr){ raw = JSON.stringify(srv.arr); }
+    else if(!srv.ok || srv.noApi){ raw = await sharedStorageGet('pegawaiData'); }
+    else{ raw = await sharedStorageGet('pegawaiData'); } // server belum punya data: benih dari data lokal/default
     if(raw){
       const arr = JSON.parse(raw);
       if(Array.isArray(arr) && arr.length){
@@ -899,18 +960,24 @@ async function loadPegawaiData(){
         });
         PEGAWAI_LIST = merged;
         indexPegawai();
-        if(merged.length !== arr.length || dupRemoved > 0) await savePegawaiData();
-        return;
+        return; // hanya membaca: tidak ada data tersimpan yang diubah saat memuat
+
       }
     }
   }catch(e){ /* belum ada data, lanjut ke seed default di bawah */ }
   PEGAWAI_LIST = STAFF_LIST.map(s=>({ nama:s.nama, jabatan:s.jabatan, kategori:s.kategori||'', password:'123456' }));
-  indexPegawai();
-  await savePegawaiData();
+  indexPegawai(); // daftar bawaan hanya di memori; baru disimpan bila admin/staf mengubah sesuatu
 }
 
-async function savePegawaiData(){
+async function savePegawaiData(silent){
   await sharedStorageSet('pegawaiData', JSON.stringify(PEGAWAI_LIST));
+  const ok = await kirimPegawaiServer();
+  if(silent) return;
+  if(!ok && !pegawaiServerReady){
+    alert('Perubahan daftar pegawai/kata sandi baru tersimpan di perangkat ini karena server belum terhubung. Muat ulang saat internet aktif, lalu ulangi perubahan.');
+  }else if(!ok){
+    alert('Gagal menyimpan daftar pegawai/kata sandi ke server. Periksa internet lalu ulangi perubahan.');
+  }
 }
 
 /* ============ AKSES ADMIN (Rekap & Pengaturan) ============
@@ -968,6 +1035,9 @@ function onLoginStaffInput(){
 
 async function loginAsStaff(){
   const v = (document.getElementById('loginStaffNama').value||'').trim();
+  if(!pegawaiServerReady && await getApiUrl()){
+    await loadPegawaiData(); // coba lagi ambil daftar & kata sandi terbaru dari server
+  }
   const found = PEGAWAI_BY_KEY[keyNama(v)];
   if(!found) return;
   const pw = document.getElementById('loginStaffPw').value||'';
@@ -1006,22 +1076,21 @@ function afterLogin(){
   document.getElementById('btnUbahPw').style.display = currentUser.role==='staff' ? 'inline-block' : 'none';
 
   if(currentUser.role==='staff'){
-    const npEl = document.getElementById('namaPegawai');
-    if(npEl && !npEl.value){ npEl.value = currentUser.nama; }
-    const njEl = document.getElementById('namaJabatan');
-    if(njEl && !njEl.value){ njEl.value = currentUser.jabatan; }
-    const nplEl = document.getElementById('namaPelapor');
-    if(nplEl && !nplEl.value){ nplEl.value = currentUser.nama; }
-    const jplEl = document.getElementById('jabatanPelapor');
-    if(jplEl && !jplEl.value){ jplEl.value = currentUser.jabatan; }
-    scheduleSave();
+    muatLaporanStaf(currentUser.nama, false);
+  }else{
+    resetSinkron();
+    setSyncStatus('Admin: pilih Nama Pegawai di langkah 1 untuk memuat laporan tersimpannya.','');
   }
 }
 
 async function logoutUser(){
   if(!confirm('Keluar dari aplikasi? Draf laporan yang belum disimpan ke Rekap Pusat tetap tersimpan di perangkat ini.')) return;
+  clearTimeout(centralTimer);
+  try{ await pushOtomatis(); }catch(e){}
+  resetSinkron();
   currentUser = null; isAdmin = false;
   await storageDelete('session');
+  kosongkanForm(null);
   document.getElementById('loginScreen').style.display = 'flex';
   document.getElementById('userBadge').style.display = 'none';
   document.getElementById('btnLogout').style.display = 'none';
@@ -1452,7 +1521,7 @@ async function sharedStorageSet(key, value){
 
 /* ============ PERSONAL DRAFT (tersimpan lokal per perangkat) ============ */
 let saveTimer=null;
-function scheduleSave(){ clearTimeout(saveTimer); saveTimer=setTimeout(saveState, 600); }
+function scheduleSave(){ clearTimeout(saveTimer); saveTimer=setTimeout(saveState, 600); scheduleCentralPush(); }
 
 async function saveState(){
   await storageSet('draft', JSON.stringify(currentData()));
@@ -1483,6 +1552,7 @@ async function loadInitial(){
 async function resetForm(){
   if(!confirm('Kosongkan seluruh isian formulir? (Laporan yang sudah disimpan ke Rekap Pusat tidak akan terhapus)')) return;
   await storageDelete('draft');
+  activeReportId=null;
   kinerjaGroups=[blankGroup(), blankGroup()];
   aktifitasRows=[blankAktifitas(),blankAktifitas(),blankAktifitas(),blankAktifitas(),blankAktifitas()];
   renderKinerja(); renderAktifitas();
@@ -1500,6 +1570,194 @@ async function resetForm(){
   }
   goStep(0);
 }
+
+
+/* ============ SINKRON LAPORAN STAF (server) ============
+   Laporan tiap staf tersimpan di Rekap Pusat (Google Apps Script). Saat staf
+   dipilih/masuk, laporannya dimuat otomatis dari server di PC mana pun, lalu
+   perubahan disimpan otomatis kembali ke server. */
+let centralReady=false, loadGagal=false, activeReportId=null, savedList=[], centralTimer=null, centralBusy=false, loadedFor='';
+
+let lastSnap='';
+function snapNow(){ try{ lastSnap=JSON.stringify(currentData()); }catch(e){ lastSnap=''; } }
+/* Cadangkan isian lokal sebelum diganti oleh data server / staf lain (tidak ada yang hilang). */
+async function cadangkanLokal(){
+  try{
+    const d=currentData();
+    if(!hasContent(d)) return;
+    await storageSet('cadangan_'+slug(d.namaPegawai)+'_'+Date.now(), JSON.stringify(d));
+  }catch(e){}
+}
+function resetSinkron(){
+  clearTimeout(centralTimer);
+  centralReady=false; loadGagal=false; activeReportId=null; savedList=[]; loadedFor='';
+  renderSavedSelect();
+}
+function setSyncStatus(msg, kind){
+  const el=document.getElementById('syncStatus');
+  if(el){ el.textContent=msg; el.dataset.kind=kind||''; }
+}
+function recId(r){ return r.reportId || buildReportId(r); }
+function periodeLabel(r){
+  return (r.tanggalAwal||'')+' '+(r.bulanAwal||'')+' – '+(r.tanggalAkhir||'')+' '+(r.bulanAkhir||'')+' '+(r.tahunLaporan||'');
+}
+function hasContent(d){
+  const t=v=>String(v||'').trim()!=='';
+  if((d.kinerjaGroups||[]).some(g=>t(g.kinerjaUtama)||(g.indikators||[]).some(i=>t(i.indikator)||t(i.capaianLalu)||t(i.satuan)||t(i.target)||t(i.realisasi)))) return true;
+  if((d.aktifitasRows||[]).some(a=>t(a.aktifitas)||t(a.capaianLalu)||t(a.satuan)||t(a.target)||t(a.realisasi))) return true;
+  return ['upaya','hambatan','rencana','catatanAtasan','tanggapan'].some(k=>t(d[k]));
+}
+function renderSavedSelect(){
+  const sel=document.getElementById('savedReportSelect');
+  if(!sel) return;
+  sel.innerHTML='<option value="">— Laporan tersimpan'+(savedList.length?' ('+savedList.length+')':'')+' —</option>'+
+    savedList.map(r=>{ const id=recId(r); return '<option value="'+escapeHtml(id)+'"'+(id===activeReportId?' selected':'')+'>'+escapeHtml(periodeLabel(r))+'</option>'; }).join('');
+}
+function noteSaved(record){
+  const id=recId(record);
+  const i=savedList.findIndex(r=>recId(r)===id);
+  if(i>=0) savedList[i]=record; else savedList.unshift(record);
+  activeReportId=id;
+  renderSavedSelect();
+}
+function kosongkanForm(found){
+  kinerjaGroups=[blankGroup(), blankGroup()];
+  aktifitasRows=[blankAktifitas(),blankAktifitas(),blankAktifitas(),blankAktifitas(),blankAktifitas()];
+  renderKinerja(); renderAktifitas();
+  isiSelectBulanTahun();
+  ['namaPegawai','namaJabatan','upaya','hambatan','rencana','catatanAtasan','tanggapan','jabatanPelapor','namaPelapor','nipPelapor','namaAtasan','nipAtasan'].forEach(id=>{ const el=document.getElementById(id); if(el) el.value=''; });
+  document.getElementById('jabatanAtasan').value='Kepala Sub Bagian Perencanaan dan Pelaporan';
+  clearSig('atasan'); clearSig('pelapor');
+  otomatisasiPeriode(true);
+  isiIdentitas(found);
+}
+function isiIdentitas(found){
+  if(!found) return;
+  const set=(id,v)=>{ const el=document.getElementById(id); if(el && !el.value) el.value=v; };
+  set('namaPegawai',found.nama); set('namaJabatan',found.jabatan);
+  set('namaPelapor',found.nama); set('jabatanPelapor',found.jabatan);
+}
+function applyRecord(rec, found){
+  kinerjaGroups = (rec.kinerjaGroups && rec.kinerjaGroups.length) ? JSON.parse(JSON.stringify(rec.kinerjaGroups)) : [blankGroup(), blankGroup()];
+  aktifitasRows = (rec.aktifitasRows && rec.aktifitasRows.length) ? JSON.parse(JSON.stringify(rec.aktifitasRows)) : [blankAktifitas(),blankAktifitas(),blankAktifitas(),blankAktifitas(),blankAktifitas()];
+  renderKinerja(); renderAktifitas();
+  isiSelectBulanTahun();
+  fillMeta(rec);
+  isiIdentitas(found);
+}
+
+async function muatLaporanStaf(nama, paksaBersih){
+  clearTimeout(centralTimer);
+  centralReady=false; loadGagal=false; activeReportId=null; savedList=[]; loadedFor=keyNama(nama);
+  renderSavedSelect();
+  const found = PEGAWAI_BY_KEY[keyNama(nama)];
+  const bukanMilikStaf = keyNama(val('namaPegawai'))!==keyNama(nama);
+  if(paksaBersih || bukanMilikStaf) await cadangkanLokal();
+  const apiUrl = await getApiUrl();
+  if(!apiUrl){
+    if(paksaBersih || bukanMilikStaf) kosongkanForm(found);
+    setSyncStatus('Rekap Pusat belum diatur — isian hanya tersimpan di perangkat ini.','warn');
+    return;
+  }
+  setSyncStatus('Memuat laporan tersimpan dari server...','busy');
+  let json=null;
+  try{ json = await apiCall('list'); }catch(e){ json=null; }
+  if(!json || !json.ok){
+    loadGagal=true;
+    if(paksaBersih || bukanMilikStaf) kosongkanForm(found);
+    setSyncStatus('⚠ Gagal memuat dari server (cek internet). Simpan otomatis dimatikan agar data lama tidak tertimpa.','err');
+    return;
+  }
+  savedList = (json.records||[])
+    .filter(r=>keyNama(r.namaPegawai)===keyNama(nama))
+    .sort((a,b)=>String(b.savedAt||'').localeCompare(String(a.savedAt||'')));
+  if(savedList.length){
+    if(!bukanMilikStaf && !paksaBersih && JSON.stringify(currentData())!==JSON.stringify(savedList[0]) ) await cadangkanLokal();
+    applyRecord(savedList[0], found);
+    activeReportId = recId(savedList[0]);
+    setSyncStatus('✔ Laporan tersimpan dimuat ('+periodeLabel(savedList[0])+'). Tinggal edit — perubahan tersimpan otomatis.','ok');
+  }else{
+    if(paksaBersih || bukanMilikStaf) kosongkanForm(found);
+    setSyncStatus('Belum ada laporan tersimpan untuk '+(found?found.nama:nama)+'. Akan tersimpan otomatis setelah diisi.','');
+  }
+  centralReady=true;
+  renderSavedSelect();
+  snapNow();
+  saveState();
+}
+
+async function pilihLaporanTersimpan(id){
+  if(!id) return;
+  const rec=savedList.find(r=>recId(r)===id);
+  if(!rec) return;
+  clearTimeout(centralTimer);
+  await pushOtomatis();
+  await cadangkanLokal();
+  applyRecord(rec, PEGAWAI_BY_KEY[loadedFor]);
+  activeReportId=id;
+  renderSavedSelect();
+  setSyncStatus('✔ Laporan periode '+periodeLabel(rec)+' dimuat.','ok');
+  snapNow();
+  saveState();
+}
+
+function onPeriodeChanged(){
+  if(!centralReady) return;
+  const id=buildReportId(currentData());
+  if(id===activeReportId) return;
+  const rec=savedList.find(r=>recId(r)===id);
+  if(rec && confirm('Laporan periode ini ('+periodeLabel(rec)+') sudah tersimpan di server. Muat laporan tersebut?\n\nOK = muat, Batal = tetap pakai isian sekarang.')){
+    clearTimeout(centralTimer);
+    applyRecord(rec, PEGAWAI_BY_KEY[loadedFor]);
+    activeReportId=id; renderSavedSelect();
+    setSyncStatus('✔ Laporan periode '+periodeLabel(rec)+' dimuat.','ok');
+    snapNow();
+    saveState();
+  }
+}
+
+function scheduleCentralPush(){
+  clearTimeout(centralTimer);
+  centralTimer=setTimeout(pushOtomatis, 2500);
+}
+
+async function pushOtomatis(){
+  if(!centralReady || !currentUser) return;
+  if(centralBusy){ scheduleCentralPush(); return; }
+  const d=currentData();
+  if(!hasContent(d)) return;
+  if(JSON.stringify(d)===lastSnap) return; // tidak ada perubahan -> jangan tulis ulang ke server
+  if(keyNama(d.namaPegawai)!==loadedFor){
+    setSyncStatus('Nama Pegawai berbeda dari akun/pegawai terpilih — tidak disimpan ke server.','warn');
+    return;
+  }
+  const id=buildReportId(d);
+  const ada=savedList.some(r=>recId(r)===id);
+  if(id!==activeReportId && !(activeReportId===null && !ada)){
+    setSyncStatus('Periode diubah — simpan otomatis dijeda agar laporan lain tidak tertimpa. Klik "Simpan sekarang" untuk menyimpan sebagai laporan periode ini.','warn');
+    return;
+  }
+  centralBusy=true;
+  setSyncStatus('Menyimpan ke server...','busy');
+  try{
+    const record=Object.assign({}, d, { savedAt:new Date().toISOString(), reportId:id });
+    const json=await apiCall('save',{ record });
+    if(json && json.ok){
+      noteSaved(record);
+      lastSnap=JSON.stringify(d);
+      setSyncStatus('✔ Tersimpan otomatis pukul '+new Date().toLocaleTimeString('id-ID',{hour:'2-digit',minute:'2-digit',second:'2-digit'})+'.','ok');
+    }else{
+      setSyncStatus('⚠ Gagal menyimpan ke server: '+(json&&json.error?json.error:'respons tidak dikenali')+'. Akan dicoba lagi saat Anda mengedit.','err');
+    }
+  }catch(e){
+    setSyncStatus('⚠ Tidak terhubung ke server. Isian aman di perangkat ini; akan dicoba lagi saat Anda mengedit.','err');
+  }
+  centralBusy=false;
+}
+
+document.addEventListener('visibilitychange', ()=>{
+  if(document.visibilityState==='hidden'){ clearTimeout(centralTimer); pushOtomatis(); }
+});
 
 /* ============ CENTRAL REKAP (backend online: Google Apps Script) ============ */
 function slug(s){ return String(s||'').trim().toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_+|_+$/g,'') || 'x'; }
@@ -1541,8 +1799,8 @@ async function apiCall(action, extra){
   const apiUrl = await getApiUrl();
   if(!apiUrl) throw new Error('URL Rekap Pusat belum diatur.');
   const key = await getApiKey();
-  if(action==='list'){
-    let url = apiUrl + (apiUrl.includes('?') ? '&' : '?') + 'action=list';
+  if(action==='list' || action==='getPegawai'){
+    let url = apiUrl + (apiUrl.includes('?') ? '&' : '?') + 'action=' + action;
     if(key) url += '&key=' + encodeURIComponent(key);
     const res = await fetch(url, { method:'GET' });
     return await res.json();
@@ -1565,6 +1823,9 @@ async function simpanKePusat(){
     switchMode('rekap');
     return;
   }
+  const idCek = buildReportId(data);
+  if(loadGagal && !confirm('Laporan lama belum berhasil dimuat dari server. Menyimpan sekarang dapat menimpa laporan periode ini. Lanjutkan?')) return;
+  if(idCek!==activeReportId && savedList.some(r=>(r.reportId||buildReportId(r))===idCek) && !confirm('Laporan periode ini sudah ada di server. Timpa dengan isian yang sekarang?')) return;
   const btn = document.getElementById('btnSimpanPusat');
   const label = btn.textContent;
   btn.disabled = true; btn.textContent = 'Menyimpan...';
@@ -1573,6 +1834,8 @@ async function simpanKePusat(){
     const record = Object.assign({}, data, { savedAt: new Date().toISOString(), reportId:id });
     const json = await apiCall('save', { record });
     if(json && json.ok){
+      noteSaved(record);
+      setSyncStatus('✔ Tersimpan di server pukul '+new Date().toLocaleTimeString('id-ID',{hour:'2-digit',minute:'2-digit'})+'.','ok');
       alert('Laporan atas nama "'+data.namaPegawai+'" berhasil disimpan ke Rekap Subbag PP (online).\nDapat dilihat siapa pun yang memiliki akses.');
     }else{
       alert('Gagal menyimpan ke Rekap Pusat: '+(json && json.error ? json.error : 'respons server tidak dikenali.'));
@@ -1613,7 +1876,7 @@ async function muatRekap(){
   try{
     const json = await apiCall('list');
     if(json && json.ok){
-      const records = json.records || [];
+      const records = (json.records || []).filter(r=>r.reportId!==PEGAWAI_REC_ID);
       records.sort((a,b)=> String(a.namaPegawai||'').localeCompare(String(b.namaPegawai||''), 'id'));
       rekapRecords = records;
       status.textContent = records.length ? (records.length+' laporan ditemukan (data online).') : 'Belum ada laporan yang disimpan ke Rekap Pusat.';
@@ -2178,9 +2441,30 @@ window.addEventListener('DOMContentLoaded', async ()=>{
     const el=document.getElementById(id);
     if(el) el.addEventListener('input', scheduleSave);
   });
+  ['bulanAwal','bulanAkhir','tahunLaporan'].forEach(id=>{
+    const el=document.getElementById(id);
+    if(el) el.addEventListener('change', onPeriodeChanged);
+  });
+  const npAdm=document.getElementById('namaPegawai');
+  if(npAdm) npAdm.addEventListener('change', async ()=>{
+    if(!currentUser || currentUser.role!=='admin') return;
+    const f=PEGAWAI_BY_KEY[keyNama(npAdm.value)];
+    if(!f || keyNama(f.nama)===loadedFor) return;
+    clearTimeout(centralTimer);
+    await pushOtomatis();
+    await muatLaporanStaf(f.nama, true);
+  });
   initSigCanvas('atasan');
   initSigCanvas('pelapor');
   goStep(0);
+  if(currentUser){
+    if(currentUser.role==='staff') muatLaporanStaf(currentUser.nama, false);
+    else{
+      const f=PEGAWAI_BY_KEY[keyNama(val('namaPegawai'))];
+      if(f) muatLaporanStaf(f.nama, false);
+      else setSyncStatus('Admin: pilih Nama Pegawai di langkah 1 untuk memuat laporan tersimpannya.','');
+    }
+  }
 });
 </script>
 </body>
